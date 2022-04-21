@@ -17,3 +17,4 @@ end
 module Lwt_fun = Ui_effect.Define1 (Lwt_fun_arg)
 
 let of_lwt_fun f a = Lwt_fun.inject (T (a, f))
+let of_unit_lwt f = Lwt_fun.inject (T ((), f))
