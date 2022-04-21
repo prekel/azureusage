@@ -13,7 +13,7 @@
 (generate_opam_files true)
 
 (package
- (name chapgame)
+ (name azureusage)
  (synopsis "")
  (description "")
  (depends

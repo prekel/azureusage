@@ -1,6 +1,6 @@
 (executable
  (name main)
  (modes js)
- (libraries core bonsai.web)
+ (libraries core bonsai.web lwt cohttp-lwt-jsoo bonsai.extra yojson js_of_ocaml-lwt)
  (preprocess
   (pps js_of_ocaml-ppx ppx_jane)))
