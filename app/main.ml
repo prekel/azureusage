@@ -46,8 +46,21 @@ let login ~submit =
             Attr.(
               many
                 [ on_click (fun _ ->
-                      submit
-                        (Mdx.Env.make ~host ~port:(Int.of_string port) ~ns ~user ~pass))
+                      let env =
+                        Mdx.Env.make ~host ~port:(Int.of_string port) ~ns ~user ~pass
+                      in
+                      let%bind.Effect status =
+                        Effect_lwt.of_unit_lwt (fun () ->
+                            let module Mdx = Mdx.Make ((val env)) in
+                            let%bind.Lwt r, _ = Mdx.test () in
+                            let status = Cohttp.Response.status r in
+                            Lwt.return status)
+                      in
+                      match status with
+                      | `OK -> submit env
+                      | _ ->
+                        Dom_html.window##alert (Js.string "Wrong password");
+                        Effect.Ignore)
                 ])
           [ Node.text "Login" ]
       ])

@@ -28,6 +28,7 @@ end
 
 module type S = sig
   val mdx : string -> (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
+  val test : unit -> (Cohttp.Response.t * Cohttp_lwt.Body.t) Lwt.t
 end
 
 module Make (Env : Env.S) : S = struct
@@ -37,7 +38,7 @@ module Make (Env : Env.S) : S = struct
     Cohttp.Header.add_authorization (Cohttp.Header.init ()) (`Basic (Env.user, Env.pass))
   ;;
 
-  let _test () =
+  let test () =
     let url = make_url ~path:"MDX2JSON/Test" ~query:[ "Namespace", [ Env.ns ] ] () in
     Cohttp_lwt_jsoo.Client.get ~headers:auth_headers url
   ;;
