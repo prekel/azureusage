@@ -12,5 +12,8 @@ opam install . --deps-only --with-test
 dune build
 ```
 
+![image](https://user-images.githubusercontent.com/19646569/164740618-fccf5a8b-d423-45a5-8b34-0c0b559cee62.png)
+
 ![image](https://user-images.githubusercontent.com/19646569/164723978-e917b11a-0d31-4ce2-a001-ce26e3b5bb3e.png)
+
 ![image](https://user-images.githubusercontent.com/19646569/164724157-24288b4f-9cc3-422b-b54a-0b1a7e37e67b.png)
