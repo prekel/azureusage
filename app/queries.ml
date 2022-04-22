@@ -113,14 +113,25 @@ let by_time
     | None -> assert false
   in
   let columns = columns |> List.map ~f:(fun t -> t.caption) |> List.to_array in
-  data
-  |> List.foldi
-       ~init:(Array.make_matrix ~dimx:column_count ~dimy:date_count None)
-       ~f:(fun i acc el ->
-         acc.(i mod column_count).(i mod date_count) <- el;
-         acc)
-  |> Array.transpose_exn
-  |> Array.to_list
-  |> List.map ~f:(fun a -> a |> Array.to_list |> List.mapi ~f:(fun i t -> dates.(i), t))
-  |> List.mapi ~f:(fun i a -> columns.(i), a)
+  try
+    data
+    |> List.foldi
+         ~init:(Array.make_matrix ~dimx:column_count ~dimy:date_count None)
+         ~f:(fun i acc el ->
+           acc.(i mod column_count).(i mod date_count) <- el;
+           acc)
+    |> Array.to_list
+    |> List.map ~f:(fun a -> a |> Array.to_list |> List.mapi ~f:(fun i t -> dates.(i), t))
+    |> List.mapi ~f:(fun i a -> columns.(i), a)
+  with
+  | _ ->
+    raise_s
+      [%message
+        ""
+          ~column_count:(column_count : int)
+          ~date_count:(date_count : int)
+          ~dates:(dates : (int * string) array)
+          ~columns:(columns : string array)
+          ~data:(data : float option list)
+          ~data_len:(List.length data : int)]
 ;;

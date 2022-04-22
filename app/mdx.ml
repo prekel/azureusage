@@ -204,8 +204,8 @@ module Make (Env : Env.S) : S = struct
              in
              match colCount, rowCount with
              | `Int colCount, `Int rowCount -> Some MdxResponse.{ colCount; rowCount }
-             | `String "", `Int rowCount -> Some MdxResponse.{ colCount = 0; rowCount }
-             | `Int colCount, `String "" -> Some MdxResponse.{ colCount; rowCount = 0 }
+             | `String "", `Int rowCount -> Some MdxResponse.{ colCount = 1; rowCount }
+             | `Int colCount, `String "" -> Some MdxResponse.{ colCount; rowCount = 1 }
              | _ -> None)
             |> Result.of_option ~error:(`WrondData (`Assoc info, [%here]))
           in

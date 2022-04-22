@@ -24,29 +24,21 @@ let field ?is_password ~pholder default =
         []) )
 ;;
 
-let select
-    ~(sexp_of_option : 'a -> _)
-    ~(option_of_sexp : _ -> 'a)
-    ~pholder
-    ?onchange
-    options
-  =
+let select ~(sexp_of_option : 'a -> _) ~(option_of_sexp : _ -> 'a) ~pholder options =
   let%sub state, set_state = Bonsai.state_opt [%here] (module Sexp) in
-  let onchange =
-    match onchange with
-    | Some onchange -> Bonsai.Value.map onchange ~f:(fun a -> Some a)
-    | None -> Bonsai.Value.return None
-  in
   let%arr state = state
   and set_state = set_state
-  and onchange = onchange
   and options = options in
   let opts =
     List.map options ~f:(fun option ->
         Vdom.(
           Node.option
             ~attr:Attr.(many [ value (option |> sexp_of_option |> Sexp.to_string_hum) ])
-            [ Node.text (option |> sexp_of_option |> Sexp.to_string_hum) ]))
+            [ Node.text
+                (match option |> sexp_of_option with
+                | Sexp.Atom str -> str
+                | sexp -> Sexp.to_string_hum sexp)
+            ]))
   in
   ( (match state with
     | Some s -> Some (option_of_sexp s)
@@ -61,15 +53,6 @@ let select
                       match Sexp.of_string s with
                       | Sexp.List [] -> None
                       | s -> Some s
-                    in
-                    let%bind.Effect () =
-                      match onchange with
-                      | Some onchange ->
-                        onchange
-                          (match state with
-                          | Some s -> Some (option_of_sexp s)
-                          | _ -> None)
-                      | None -> Effect.Ignore
                     in
                     set_state state)
               ; placeholder pholder
@@ -205,7 +188,7 @@ module ChartJS = struct
 
   type dataset =
     { label : string
-    ; data : int array
+    ; data : float array
     ; backgroundColor : string array
     ; borderColor : string array
     ; borderWidth : int
@@ -221,35 +204,43 @@ module ChartJS = struct
     ; data : data
     }
 
-  val create : Context.t -> params -> t [@@js.new "Chart"]]
+  val create : Context.t -> params -> t [@@js.new "Chart"]
+  val destroy : t -> unit -> unit [@@js.call]]
 end
 
 module ChartJSWidget = struct
   type dom = Dom_html.canvasElement
 
   module Input = struct
-    type t = unit [@@deriving sexp_of]
+    type t =
+      { labels : string array
+      ; data : float array
+      }
+    [@@deriving sexp_of]
   end
 
   module State = struct
-    type t = unit [@@deriving sexp_of]
+    type t =
+      { context : (Dom_html.canvasRenderingContext2D Js.t[@sexp.opaque])
+      ; chart : (ChartJS.Chart.t[@sexp.opaque])
+      }
+    [@@deriving sexp_of]
   end
 
   let name = "ChartJSWidget"
 
   let create i =
-    let _ = i in
-    let el = Dom_html.createCanvas Dom_html.document in
-    let ctx = el##getContext Dom_html._2d_ in
-    let _c =
+    let canvas = Dom_html.createCanvas Dom_html.document in
+    let context = canvas##getContext Dom_html._2d_ in
+    let chart =
       ChartJS.Chart.create
-        ctx
+        context
         { type_ = "bar"
         ; data =
-            { labels = [| "qwf" |]
+            { labels = i.Input.labels
             ; datasets =
-                [| { label = "# of Votes"
-                   ; data = [| 12; 19; 3; 5; 2; 3 |]
+                [| { label = ""
+                   ; data = i.data
                    ; backgroundColor =
                        [| "rgba(255, 99, 132, 0.2)"
                         ; "rgba(54, 162, 235, 0.2)"
@@ -272,12 +263,48 @@ module ChartJSWidget = struct
             }
         }
     in
-    (), el
+    State.{ context; chart }, canvas
   ;;
 
-  let update ~prev_input ~input ~state ~element =
-    let _ = prev_input, input in
-    state, element
+  let update
+      ~prev_input:_
+      ~input:Input.{ data; labels }
+      ~state:State.{ context; chart }
+      ~element:canvas
+    =
+    ChartJS.Chart.destroy chart ();
+    let chart =
+      ChartJS.Chart.create
+        context
+        { type_ = "bar"
+        ; data =
+            { labels
+            ; datasets =
+                [| { label = ""
+                   ; data
+                   ; backgroundColor =
+                       [| "rgba(255, 99, 132, 0.2)"
+                        ; "rgba(54, 162, 235, 0.2)"
+                        ; "rgba(255, 206, 86, 0.2)"
+                        ; "rgba(75, 192, 192, 0.2)"
+                        ; "rgba(153, 102, 255, 0.2)"
+                        ; "rgba(255, 159, 64, 0.2)"
+                       |]
+                   ; borderColor =
+                       [| "rgba(255, 99, 132, 1)"
+                        ; "rgba(54, 162, 235, 1)"
+                        ; "rgba(255, 206, 86, 1)"
+                        ; "rgba(75, 192, 192, 1)"
+                        ; "rgba(153, 102, 255, 1)"
+                        ; "rgba(255, 159, 64, 1)"
+                       |]
+                   ; borderWidth = 1
+                   }
+                |]
+            }
+        }
+    in
+    State.{ context; chart }, canvas
   ;;
 
   let destroy ~prev_input ~state ~element =
@@ -289,10 +316,10 @@ end
 let chartjs =
   let w = Vdom.Node.widget_of_module (module ChartJSWidget) in
   let s = w |> Staged.unstage in
-  s ()
+  s
 ;;
 
-let frm mdx =
+let frm ~(chart_widget : (ChartJSWidget.Input.t -> Vdom.Node.t) Staged.t) mdx =
   let%sub columns, set_columns =
     Bonsai.state
       [%here]
@@ -301,26 +328,12 @@ let frm mdx =
       end)
       ~default_model:[]
   in
-  let%sub onchange =
-    let%arr set_columns = set_columns
-    and (module Mdx : Mdx.S) = mdx in
-    function
-    | Some dim ->
-      (match%bind.Effect
-         Effect_lwt.of_unit_lwt (fun () ->
-             Queries.query_columns_by_dimension ~data:dim |> Mdx.mdx)
-       with
-      | Ok r -> Queries.columns_by_dimension r |> set_columns
-      | Error _ -> assert false)
-    | None -> set_columns []
-  in
   let%sub dimension, select_dimension =
     Bonsai.Value.return Queries.all_data_dimensions
     |> select
          ~sexp_of_option:[%sexp_of: Queries.data_dimension]
          ~option_of_sexp:[%of_sexp: Queries.data_dimension]
          ~pholder:"Dimension"
-         ~onchange
   in
   let%sub measure, select_measure =
     Bonsai.Value.return Queries.all_measures
@@ -329,6 +342,33 @@ let frm mdx =
          ~option_of_sexp:[%of_sexp: Queries.measure]
          ~pholder:"Measure"
   in
+  let%sub data, set_data =
+    Bonsai.state_opt
+      [%here]
+      (module struct
+        type t = (string * ((int * string) * float option) list) list
+        [@@deriving sexp, equal]
+      end)
+  in
+  let fq ~set_data ~mdx:(module Mdx : Mdx.S) ~column ~dimension ~measure =
+    match column, dimension, measure with
+    | Some column, Some dimension, Some measure ->
+      (match%bind.Effect
+         Effect_lwt.of_unit_lwt (fun () ->
+             Queries.query_by_time ~data:dimension ~time:`Day ~measure [ column ]
+             |> Mdx.mdx)
+       with
+      | Ok r -> Some (Queries.by_time r) |> set_data
+      | Error _ -> assert false)
+    | _ -> Effect.Ignore
+  in
+  let%sub on_column_change =
+    let%arr set_data = set_data
+    and dimension = dimension
+    and measure = measure
+    and mdx = mdx in
+    fun column -> fq ~set_data ~mdx ~column ~dimension ~measure
+  in
   let%sub column, select_column =
     columns
     |> select
@@ -336,38 +376,95 @@ let frm mdx =
          ~option_of_sexp:[%of_sexp: string]
          ~pholder:"Selected"
   in
-  let%arr columns = columns
-  and dimension = dimension
+  let%sub on_data_dimension_change =
+    let%arr set_columns = set_columns
+    and set_data = set_data
+    and column = column
+    and measure = measure
+    and (module Mdx : Mdx.S) = mdx in
+    fun dimension ->
+      let%bind.Effect () =
+        match dimension with
+        | Some dim ->
+          (match%bind.Effect
+             Effect_lwt.of_unit_lwt (fun () ->
+                 Queries.query_columns_by_dimension ~data:dim |> Mdx.mdx)
+           with
+          | Ok r -> Queries.columns_by_dimension r |> set_columns
+          | Error _ -> assert false)
+        | None -> set_columns []
+      in
+      fq ~set_data ~mdx:(module Mdx) ~column ~dimension ~measure
+  in
+  let%sub on_measure_change =
+    let%arr set_data = set_data
+    and column = column
+    and dimension = dimension
+    and (module Mdx : Mdx.S) = mdx in
+    fun measure -> fq ~set_data ~mdx:(module Mdx) ~column ~dimension ~measure
+  in
+  let%sub () =
+    Bonsai.Edge.on_change
+      [%here]
+      (module struct
+        type t = Queries.data_dimension option [@@deriving sexp, equal]
+      end)
+      dimension
+      ~callback:on_data_dimension_change
+  in
+  let%sub () =
+    Bonsai.Edge.on_change
+      [%here]
+      (module struct
+        type t = Queries.measure option [@@deriving sexp, equal]
+      end)
+      measure
+      ~callback:on_measure_change
+  in
+  let%sub () =
+    Bonsai.Edge.on_change
+      [%here]
+      (module struct
+        type t = string option [@@deriving sexp, equal]
+      end)
+      column
+      ~callback:on_column_change
+  in
+  let%arr _columns = columns
+  and _dimension = dimension
   and select_dimension = select_dimension
-  and measure = measure
+  and _measure = measure
   and select_measure = select_measure
-  and column = column
-  and select_column = select_column in
+  and _column = column
+  and select_column = select_column
+  and data = data in
   Vdom.(
     Node.div
-      [ Node.pre [ Node.text (Sexp.to_string_hum [%sexp (columns : string list)]) ]
-      ; Node.pre
-          [ Node.text
-              (Sexp.to_string_hum [%sexp (dimension : Queries.data_dimension option)])
-          ]
-      ; select_dimension
-      ; Node.pre
-          [ Node.text (Sexp.to_string_hum [%sexp (measure : Queries.measure option)]) ]
+      [ select_dimension
       ; select_measure
-      ; Node.pre [ Node.text (Sexp.to_string_hum [%sexp (column : string option)]) ]
       ; select_column
+      ; (match data with
+        | Some [ (_col, d) ] ->
+          let labels, data = List.unzip d in
+          (chart_widget |> Staged.unstage)
+            ChartJSWidget.Input.
+              { labels = labels |> List.map ~f:snd |> List.to_array
+              ; data = data |> List.map ~f:(Option.value ~default:0.) |> List.to_array
+              }
+        | None -> Node.none
+        | _ -> Node.none)
       ])
 ;;
 
-let view ~env =
+let view ~chart_widget ~env =
   let%sub mdx =
     let%arr env = env in
     (module Mdx.Make ((val env : Mdx.Env.S)) : Mdx.S)
   in
-  frm mdx
+  frm ~chart_widget mdx
 ;;
 
-let app =
+let app ~chart_widget =
   let%sub env, set_env =
     Bonsai.state_opt
       [%here]
@@ -384,11 +481,14 @@ let app =
     fun s -> set_env (Some s)
   in
   match%sub env with
-  | Some env -> view ~env
+  | Some env -> view ~chart_widget ~env
   | None -> login ~submit
 ;;
 
 let (_ : _ Start.Handle.t) =
-  Start.start Start.Result_spec.just_the_view ~bind_to_element_with_id:"app" app
+  let chart_widget = Vdom.Node.widget_of_module (module ChartJSWidget) in
+  Start.start
+    Start.Result_spec.just_the_view
+    ~bind_to_element_with_id:"app"
+    (app ~chart_widget)
 ;;
-(* (Bonsai.const chartjs) *)
