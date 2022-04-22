@@ -106,7 +106,7 @@ module Make (Env : Env.S) : S = struct
     ]
   [@@deriving sexp]
 
-  type data_error = [ `WrondData of Yojson_sexp.Safe.t * Utils.LexingPosition.t ]
+  type data_error = [ `WrondData of Utils.Yojson.Safe.t * Utils.LexingPosition.t ]
   [@@deriving sexp]
 
   let make_url ?query =

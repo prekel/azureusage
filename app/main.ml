@@ -4,17 +4,19 @@ open Bonsai_web
 open Bonsai.Let_syntax
 
 let field ?is_password ~pholder default =
-  let%sub pass, set_pass = Bonsai.state [%here] (module String) ~default_model:default in
-  let%arr pass = pass
-  and set_pass = set_pass in
-  ( pass
+  let%sub state, set_state =
+    Bonsai.state [%here] (module String) ~default_model:default
+  in
+  let%arr state = state
+  and set_state = set_state in
+  ( state
   , Vdom.(
       Node.input
         ~attr:
           Attr.(
             many
-              [ on_input (fun _ -> set_pass)
-              ; value pass
+              [ on_input (fun _ -> set_state)
+              ; value state
               ; placeholder pholder
               ; type_
                   (match is_password with
@@ -55,11 +57,10 @@ let select ~(sexp_of_option : 'a -> _) ~(option_of_sexp : _ -> 'a) ~pholder opti
                       | s -> Some s
                     in
                     set_state state)
-              ; placeholder pholder
               ])
         (Node.option
            ~attr:Attr.(many [ value (Sexp.List [] |> Sexp.to_string_hum) ])
-           [ Node.text "" ]
+           [ Node.text (" Select " ^ pholder) ]
         :: opts)) )
 ;;
 
@@ -116,210 +117,7 @@ let login ~submit =
       ])
 ;;
 
-let _view ~env =
-  let%sub res, set_res =
-    Bonsai.state_opt
-      [%here]
-      (module struct
-        type t = string list [@@deriving sexp, equal]
-      end)
-  in
-  let%arr env = env
-  and res = res
-  and set_res = set_res in
-  let module Mdx = Mdx.Make ((val env : Mdx.Env.S)) in
-  Vdom.(
-    Node.div
-      [ begin
-          match res with
-          | None -> Node.none
-          | Some res ->
-            Node.pre [ Node.text (Sexp.to_string_hum [%sexp (res : string list)]) ]
-        end
-      ; Node.button
-          ~attr:
-            Attr.(
-              many
-                [ on_click (fun _ ->
-                      let%bind.Effect nums =
-                        Effect_lwt.of_unit_lwt (fun () ->
-                            let query =
-                              Queries.query_columns_by_dimension ~data:`ServiceType
-                            in
-                            let%bind.Lwt nums = Mdx.mdx query in
-                            Lwt.return nums)
-                      in
-                      match nums with
-                      | Ok nums -> set_res (Some (Queries.columns_by_dimension nums))
-                      | Error (#Mdx.http_error as status) ->
-                        Dom_html.window##alert
-                          ([%sexp (status : Mdx.http_error)]
-                          |> Sexp.to_string_hum
-                          |> Js.string);
-                        Effect.Ignore
-                      | Error (`WrondData (_, pos)) ->
-                        print_s [%message "WrondData" ~pos:(pos : Utils.LexingPosition.t)];
-                        Effect.Ignore)
-                ])
-          [ Node.text "query" ]
-      ])
-;;
-
-module Make_OjsT_from_JsT (M : sig
-  type t
-end) : Ojs.T with type t = M.t = struct
-  type t = M.t
-
-  let t_of_js = Obj.magic
-  let t_to_js = Obj.magic
-end
-
-module ChartJS = struct
-  module Context = Make_OjsT_from_JsT (struct
-    type t = Dom_html.canvasRenderingContext2D Js.t
-  end)
-
-  module Chart =
-  [%js:
-  type t
-
-  val t_of_js : Ojs.t -> t
-  val t_to_js : t -> Ojs.t
-
-  type dataset =
-    { label : string
-    ; data : float array
-    ; backgroundColor : string array
-    ; borderColor : string array
-    ; borderWidth : int
-    }
-
-  type data =
-    { labels : string array
-    ; datasets : dataset array
-    }
-
-  type params =
-    { type_ : string [@js "type"]
-    ; data : data
-    }
-
-  val create : Context.t -> params -> t [@@js.new "Chart"]
-  val destroy : t -> unit -> unit [@@js.call]]
-end
-
-module ChartJSWidget = struct
-  type dom = Dom_html.canvasElement
-
-  module Input = struct
-    type t =
-      { labels : string array
-      ; data : float array
-      }
-    [@@deriving sexp_of]
-  end
-
-  module State = struct
-    type t =
-      { context : (Dom_html.canvasRenderingContext2D Js.t[@sexp.opaque])
-      ; chart : (ChartJS.Chart.t[@sexp.opaque])
-      }
-    [@@deriving sexp_of]
-  end
-
-  let name = "ChartJSWidget"
-
-  let create i =
-    let canvas = Dom_html.createCanvas Dom_html.document in
-    let context = canvas##getContext Dom_html._2d_ in
-    let chart =
-      ChartJS.Chart.create
-        context
-        { type_ = "bar"
-        ; data =
-            { labels = i.Input.labels
-            ; datasets =
-                [| { label = ""
-                   ; data = i.data
-                   ; backgroundColor =
-                       [| "rgba(255, 99, 132, 0.2)"
-                        ; "rgba(54, 162, 235, 0.2)"
-                        ; "rgba(255, 206, 86, 0.2)"
-                        ; "rgba(75, 192, 192, 0.2)"
-                        ; "rgba(153, 102, 255, 0.2)"
-                        ; "rgba(255, 159, 64, 0.2)"
-                       |]
-                   ; borderColor =
-                       [| "rgba(255, 99, 132, 1)"
-                        ; "rgba(54, 162, 235, 1)"
-                        ; "rgba(255, 206, 86, 1)"
-                        ; "rgba(75, 192, 192, 1)"
-                        ; "rgba(153, 102, 255, 1)"
-                        ; "rgba(255, 159, 64, 1)"
-                       |]
-                   ; borderWidth = 1
-                   }
-                |]
-            }
-        }
-    in
-    State.{ context; chart }, canvas
-  ;;
-
-  let update
-      ~prev_input:_
-      ~input:Input.{ data; labels }
-      ~state:State.{ context; chart }
-      ~element:canvas
-    =
-    ChartJS.Chart.destroy chart ();
-    let chart =
-      ChartJS.Chart.create
-        context
-        { type_ = "bar"
-        ; data =
-            { labels
-            ; datasets =
-                [| { label = ""
-                   ; data
-                   ; backgroundColor =
-                       [| "rgba(255, 99, 132, 0.2)"
-                        ; "rgba(54, 162, 235, 0.2)"
-                        ; "rgba(255, 206, 86, 0.2)"
-                        ; "rgba(75, 192, 192, 0.2)"
-                        ; "rgba(153, 102, 255, 0.2)"
-                        ; "rgba(255, 159, 64, 0.2)"
-                       |]
-                   ; borderColor =
-                       [| "rgba(255, 99, 132, 1)"
-                        ; "rgba(54, 162, 235, 1)"
-                        ; "rgba(255, 206, 86, 1)"
-                        ; "rgba(75, 192, 192, 1)"
-                        ; "rgba(153, 102, 255, 1)"
-                        ; "rgba(255, 159, 64, 1)"
-                       |]
-                   ; borderWidth = 1
-                   }
-                |]
-            }
-        }
-    in
-    State.{ context; chart }, canvas
-  ;;
-
-  let destroy ~prev_input ~state ~element =
-    let _ = prev_input, state, element in
-    ()
-  ;;
-end
-
-let chartjs =
-  let w = Vdom.Node.widget_of_module (module ChartJSWidget) in
-  let s = w |> Staged.unstage in
-  s
-;;
-
-let frm ~(chart_widget : (ChartJSWidget.Input.t -> Vdom.Node.t) Staged.t) mdx =
+let frm ~chart_widget mdx =
   let%sub columns, set_columns =
     Bonsai.state
       [%here]
@@ -374,7 +172,7 @@ let frm ~(chart_widget : (ChartJSWidget.Input.t -> Vdom.Node.t) Staged.t) mdx =
     |> select
          ~sexp_of_option:[%sexp_of: string]
          ~option_of_sexp:[%of_sexp: string]
-         ~pholder:"Selected"
+         ~pholder:"column"
   in
   let%sub on_data_dimension_change =
     let%arr set_columns = set_columns
@@ -430,12 +228,8 @@ let frm ~(chart_widget : (ChartJSWidget.Input.t -> Vdom.Node.t) Staged.t) mdx =
       column
       ~callback:on_column_change
   in
-  let%arr _columns = columns
-  and _dimension = dimension
-  and select_dimension = select_dimension
-  and _measure = measure
+  let%arr select_dimension = select_dimension
   and select_measure = select_measure
-  and _column = column
   and select_column = select_column
   and data = data in
   Vdom.(
@@ -447,7 +241,7 @@ let frm ~(chart_widget : (ChartJSWidget.Input.t -> Vdom.Node.t) Staged.t) mdx =
         | Some [ (_col, d) ] ->
           let labels, data = List.unzip d in
           (chart_widget |> Staged.unstage)
-            ChartJSWidget.Input.
+            Chart.Widget.Input.
               { labels = labels |> List.map ~f:snd |> List.to_array
               ; data = data |> List.map ~f:(Option.value ~default:0.) |> List.to_array
               }
@@ -486,7 +280,7 @@ let app ~chart_widget =
 ;;
 
 let (_ : _ Start.Handle.t) =
-  let chart_widget = Vdom.Node.widget_of_module (module ChartJSWidget) in
+  let chart_widget = Vdom.Node.widget_of_module (module Chart.Widget) in
   Start.start
     Start.Result_spec.just_the_view
     ~bind_to_element_with_id:"app"
