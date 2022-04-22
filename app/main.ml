@@ -127,7 +127,43 @@ let view ~env =
       ])
 ;;
 
-let app =
+module ChartJSWidget = struct
+  type dom = Dom_html.element
+
+  module Input = struct
+    type t = unit [@@deriving sexp_of]
+  end
+
+  module State = struct
+    type t = unit [@@deriving sexp_of]
+  end
+
+  let name = "ChartJSWidget"
+
+  let create i =
+    let _ = i in
+    let el = Dom_html.document##createElement (Js.string "div") in
+    (), el
+  ;;
+
+  let update ~prev_input ~input ~state ~element =
+    let _ = prev_input, input in
+    state, element
+  ;;
+
+  let destroy ~prev_input ~state ~element =
+    let _ = prev_input, state, element in
+    ()
+  ;;
+end
+
+let chartjs =
+  let w = Vdom.Node.widget_of_module (module ChartJSWidget) in
+  let s = w |> Staged.unstage in
+  s ()
+;;
+
+let _app =
   let%sub env, set_env =
     Bonsai.state_opt
       [%here]
@@ -149,5 +185,8 @@ let app =
 ;;
 
 let (_ : _ Start.Handle.t) =
-  Start.start Start.Result_spec.just_the_view ~bind_to_element_with_id:"app" app
+  Start.start
+    Start.Result_spec.just_the_view
+    ~bind_to_element_with_id:"app"
+    (Bonsai.const chartjs)
 ;;
