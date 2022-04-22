@@ -105,13 +105,17 @@ let view ~env =
                       let%bind.Effect nums =
                         Effect_lwt.of_unit_lwt (fun () ->
                             let query =
-                              {|SELECT NON EMPTY NONEMPTYCROSSJOIN([Date].[H1].[Month].Members,[Measures].[Cost]) ON 0,NON EMPTY [ServiceRegion].[H1].[ServiceRegion].Members ON 1 FROM [AZUREUSAGE]|}
+                              {|
+                              SELECT NON EMPTY 
+                              NONEMPTYCROSSJOIN([Service].[H1].[ServiceResource].Members,[Measures].[Cost]) 
+                              ON 0,NON EMPTY [Date].[H1].[Day].Members 
+                              ON 1 FROM [AZUREUSAGE]|}
                             in
                             let%bind.Lwt nums = Mdx.mdx query in
                             Lwt.return nums)
                       in
                       match nums with
-                      | Ok nums -> set_res (Some nums)
+                      | Ok nums -> set_res (Some nums.data)
                       | Error (#Mdx.http_error as status) ->
                         Dom_html.window##alert
                           ([%sexp (status : Mdx.http_error)]
@@ -237,7 +241,7 @@ let chartjs =
   s ()
 ;;
 
-let _app =
+let app =
   let%sub env, set_env =
     Bonsai.state_opt
       [%here]
@@ -262,5 +266,6 @@ let (_ : _ Start.Handle.t) =
   Start.start
     Start.Result_spec.just_the_view
     ~bind_to_element_with_id:"app"
-    (Bonsai.const chartjs)
+    app
+    (* (Bonsai.const chartjs) *)
 ;;
