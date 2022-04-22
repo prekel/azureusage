@@ -127,8 +127,50 @@ let view ~env =
       ])
 ;;
 
+module Make_OjsT_from_JsT (M : sig
+  type t
+end) : Ojs.T with type t = M.t = struct
+  type t = M.t
+
+  let t_of_js x = Stdlib.Obj.magic x
+  let t_to_js x = Stdlib.Obj.magic x
+end
+
+module ChartJS = struct
+  module Context = Make_OjsT_from_JsT (struct
+    type t = Dom_html.canvasRenderingContext2D Js.t
+  end)
+
+  module Chart =
+  [%js:
+  type t
+
+  val t_of_js : Ojs.t -> t
+  val t_to_js : t -> Ojs.t
+
+  type dataset =
+    { label : string
+    ; data : int array
+    ; backgroundColor : string array
+    ; borderColor : string array
+    ; borderWidth : int
+    }
+
+  type data =
+    { labels : string array
+    ; datasets : dataset array
+    }
+
+  type params =
+    { type_ : string [@js "type"]
+    ; data : data
+    }
+
+  val create : Context.t -> params -> t [@@js.new "Chart"]]
+end
+
 module ChartJSWidget = struct
-  type dom = Dom_html.element
+  type dom = Dom_html.canvasElement
 
   module Input = struct
     type t = unit [@@deriving sexp_of]
@@ -142,7 +184,39 @@ module ChartJSWidget = struct
 
   let create i =
     let _ = i in
-    let el = Dom_html.document##createElement (Js.string "div") in
+    let el = Dom_html.createCanvas Dom_html.document in
+    let ctx = el##getContext Dom_html._2d_ in
+    let _c =
+      ChartJS.Chart.create
+        ctx
+        { type_ = "bar"
+        ; data =
+            { labels = [| "qwf" |]
+            ; datasets =
+                [| { label = "# of Votes"
+                   ; data = [| 12; 19; 3; 5; 2; 3 |]
+                   ; backgroundColor =
+                       [| "rgba(255, 99, 132, 0.2)"
+                        ; "rgba(54, 162, 235, 0.2)"
+                        ; "rgba(255, 206, 86, 0.2)"
+                        ; "rgba(75, 192, 192, 0.2)"
+                        ; "rgba(153, 102, 255, 0.2)"
+                        ; "rgba(255, 159, 64, 0.2)"
+                       |]
+                   ; borderColor =
+                       [| "rgba(255, 99, 132, 1)"
+                        ; "rgba(54, 162, 235, 1)"
+                        ; "rgba(255, 206, 86, 1)"
+                        ; "rgba(75, 192, 192, 1)"
+                        ; "rgba(153, 102, 255, 1)"
+                        ; "rgba(255, 159, 64, 1)"
+                       |]
+                   ; borderWidth = 1
+                   }
+                |]
+            }
+        }
+    in
     (), el
   ;;
 

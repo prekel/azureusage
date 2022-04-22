@@ -24,6 +24,7 @@
   js_of_ocaml
   bonsai
   cohttp-lwt-jsoo
+  (gen_js_api :build)
   (ocaml-embed-file :build)
   (ppx_jane :build)
   (ocaml-lsp-server :with-test)
