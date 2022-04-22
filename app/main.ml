@@ -132,8 +132,8 @@ module Make_OjsT_from_JsT (M : sig
 end) : Ojs.T with type t = M.t = struct
   type t = M.t
 
-  let t_of_js x = Stdlib.Obj.magic x
-  let t_to_js x = Stdlib.Obj.magic x
+  let t_of_js = Obj.magic
+  let t_to_js = Obj.magic
 end
 
 module ChartJS = struct

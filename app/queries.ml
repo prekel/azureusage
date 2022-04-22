@@ -1,0 +1,1 @@
+module Make (Mdx : Mdx.S) = struct end

@@ -104,6 +104,48 @@ module Make (Env : Env.S) : S = struct
     | status -> Lwt.return (Error (`OtherStatus status))
   ;;
 
+  module MdxResponse = struct
+    type tuple =
+      { caption : string
+      ; cellStyle : string
+      ; dimension : string
+      ; format : string
+      ; headerStyle : string
+      ; path : string
+      ; title : string
+      ; total : string
+      ; type_ : string
+      ; valueID : int
+      ; vis : int
+      }
+    [@@deriving sexp]
+
+    type col = { tuples : tuple list } [@@deriving sexp]
+
+    type info =
+      { colCount : string
+      ; colKey : string
+      ; cubeClass : string
+      ; cubeKey : string
+      ; cubeName : string
+      ; decimalSeparator : string
+      ; numericGroupSeparator : string
+      ; numericGroupSize : int
+      ; percentDone : int
+      ; queryKey : string
+      ; rowCount : int
+      ; rowKey : string
+      }
+    [@@deriving sexp]
+
+    type t =
+      { cols : col list
+      ; data : float option list
+      ; info : info
+      }
+    [@@deriving sexp]
+  end
+
   let mdx query =
     let%bind r, b =
       make_url ~path:"MDX2JSON/MDX" ()
