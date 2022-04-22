@@ -1,5 +1,30 @@
 open Core
 
+module MdxResponse = struct
+  type tuple =
+    { caption : string
+    ; dimension : string
+    ; path : string
+    ; valueID : int
+    }
+  [@@deriving sexp]
+
+  type col = { tuples : tuple list } [@@deriving sexp]
+
+  type info =
+    { colCount : int
+    ; rowCount : int
+    }
+  [@@deriving sexp]
+
+  type t =
+    { cols : col * col option
+    ; data : float option list
+    ; info : info
+    }
+  [@@deriving sexp]
+end
+
 module Env = struct
   module type S = sig
     val host : string
@@ -67,41 +92,8 @@ module type S = sig
     ]
   [@@deriving sexp]
 
-  type data_error = [ `WrondData of Yojson.Safe.t ] [@@deriving sexp]
-
-  module MdxResponse : sig
-    type tuple =
-      { caption : string
-      ; dimension : string
-      ; path : string
-      }
-    [@@deriving sexp]
-
-    type col = { tuples : tuple list } [@@deriving sexp]
-
-    type info =
-      { colCount : int
-      ; colKey : string
-      ; cubeClass : string
-      ; cubeKey : string
-      ; cubeName : string
-      ; decimalSeparator : string
-      ; numericGroupSeparator : string
-      ; numericGroupSize : int
-      ; percentDone : int
-      ; queryKey : string
-      ; rowCount : int
-      ; rowKey : string
-      }
-    [@@deriving sexp]
-
-    type t =
-      { cols : col * col
-      ; data : float option list
-      ; info : info
-      }
-    [@@deriving sexp]
-  end
+  type data_error = [ `WrondData of Yojson.Safe.t * Utils.LexingPosition.t ]
+  [@@deriving sexp]
 
   val mdx : string -> (MdxResponse.t, [ http_error | data_error ]) Result.t Lwt.t
   val test : unit -> (unit, http_error) Result.t Lwt.t
@@ -114,7 +106,8 @@ module Make (Env : Env.S) : S = struct
     ]
   [@@deriving sexp]
 
-  type data_error = [ `WrondData of Yojson_sexp.Safe.t ] [@@deriving sexp]
+  type data_error = [ `WrondData of Yojson_sexp.Safe.t * Utils.LexingPosition.t ]
+  [@@deriving sexp]
 
   let make_url ?query =
     let query = Option.value ~default:[] query in
@@ -138,40 +131,6 @@ module Make (Env : Env.S) : S = struct
     | status -> Lwt.return (Error (`OtherStatus status))
   ;;
 
-  module MdxResponse = struct
-    type tuple =
-      { caption : string
-      ; dimension : string
-      ; path : string
-      }
-    [@@deriving sexp]
-
-    type col = { tuples : tuple list } [@@deriving sexp]
-
-    type info =
-      { colCount : int
-      ; colKey : string
-      ; cubeClass : string
-      ; cubeKey : string
-      ; cubeName : string
-      ; decimalSeparator : string
-      ; numericGroupSeparator : string
-      ; numericGroupSize : int
-      ; percentDone : int
-      ; queryKey : string
-      ; rowCount : int
-      ; rowKey : string
-      }
-    [@@deriving sexp]
-
-    type t =
-      { cols : col * col
-      ; data : float option list
-      ; info : info
-      }
-    [@@deriving sexp]
-  end
-
   let mdx query =
     let%bind r, b =
       make_url ~path:"MDX2JSON/MDX" ()
@@ -188,31 +147,9 @@ module Make (Env : Env.S) : S = struct
       let j = Yojson.Safe.from_string b in
       let m =
         match j with
-        | `Assoc
-            [ ( "Cols"
-              , `List
-                  [ `Assoc [ ("tuples", `List tuples1) ]
-                  ; `Assoc [ ("tuples", `List tuples2) ]
-                  ] )
-            ; ("Data", `List data)
-            ; ( "Info"
-              , `Assoc
-                  [ ("colCount", `Int colCount)
-                  ; ("colKey", `String colKey)
-                  ; ("cubeClass", `String cubeClass)
-                  ; ("cubeKey", `String cubeKey)
-                  ; ("cubeName", `String cubeName)
-                  ; ("decimalSeparator", `String decimalSeparator)
-                  ; ("numericGroupSeparator", `String numericGroupSeparator)
-                  ; ("numericGroupSize", `Int numericGroupSize)
-                  ; ("percentDone", `Int percentDone)
-                  ; ("queryKey", `String queryKey)
-                  ; ("rowCount", `Int rowCount)
-                  ; ("rowKey", `String rowKey)
-                  ] )
-            ] ->
+        | `Assoc [ ("Cols", `List cols); ("Data", `List data); ("Info", `Assoc info) ] ->
           let to_tuples tuples =
-            List.fold_result tuples1 ~init:[] ~f:(fun acc -> function
+            List.fold_result tuples ~init:[] ~f:(fun acc -> function
               | `Assoc l ->
                 begin
                   match
@@ -223,47 +160,63 @@ module Make (Env : Env.S) : S = struct
                       List.Assoc.find ~equal:String.equal l "dimension"
                     in
                     let%bind.Option path = List.Assoc.find ~equal:String.equal l "path" in
-                    match caption, dimension, path with
-                    | `String caption, `String dimension, `String path ->
-                      Some MdxResponse.{ caption; dimension; path }
+                    let%bind.Option valueID =
+                      List.Assoc.find ~equal:String.equal l "valueID"
+                    in
+                    match caption, dimension, path, valueID with
+                    | `String caption, `String dimension, `String path, `Int valueID ->
+                      Some MdxResponse.{ caption; dimension; path; valueID }
                     | _ -> None
                   with
                   | Some c -> Ok (c :: acc)
-                  | None -> Error (`WrondData (`List tuples))
+                  | None -> Error (`WrondData (`List tuples, [%here]))
                 end
-              | item -> Error (`WrondData item))
+              | item -> Error (`WrondData (item, [%here])))
             |> Result.map ~f:List.rev
           in
-          let%bind.Result tuples1 = to_tuples tuples1 in
-          let%bind.Result tuples2 = to_tuples tuples2 in
+          let%bind.Result tuples1, tuples2 =
+            match cols with
+            | [ `Assoc [ ("tuples", `List tuples) ] ] ->
+              let%map.Result t1 = to_tuples tuples in
+              t1, None
+            | [ `Assoc [ ("tuples", `List tuples1) ]
+              ; `Assoc [ ("tuples", `List tuples2) ]
+              ] ->
+              let%bind.Result t1 = to_tuples tuples1 in
+              let%map.Result t2 = to_tuples tuples2 in
+              t1, Some t2
+            | _ -> Error (`WrondData (`List cols, [%here]))
+          in
           let%bind.Result data =
             List.fold_result data ~init:[] ~f:(fun acc -> function
               | `Int i -> Ok (Some (Int.to_float i) :: acc)
               | `Float f -> Ok (Some f :: acc)
               | `String "" -> Ok (None :: acc)
-              | item -> Error (`WrondData item))
+              | item -> Error (`WrondData (item, [%here])))
             |> Result.map ~f:List.rev
           in
-          let info =
-            MdxResponse.
-              { colCount
-              ; colKey
-              ; cubeClass
-              ; cubeKey
-              ; cubeName
-              ; decimalSeparator
-              ; numericGroupSeparator
-              ; numericGroupSize
-              ; percentDone
-              ; queryKey
-              ; rowCount
-              ; rowKey
-              }
+          let%bind.Result info =
+            (let%bind.Option colCount =
+               List.Assoc.find ~equal:String.equal info "colCount"
+             in
+             let%bind.Option rowCount =
+               List.Assoc.find ~equal:String.equal info "rowCount"
+             in
+             match colCount, rowCount with
+             | `Int colCount, `Int rowCount -> Some MdxResponse.{ colCount; rowCount }
+             | `String "", `Int rowCount -> Some MdxResponse.{ colCount = 0; rowCount }
+             | `Int colCount, `String "" -> Some MdxResponse.{ colCount; rowCount = 0 }
+             | _ -> None)
+            |> Result.of_option ~error:(`WrondData (`Assoc info, [%here]))
           in
-          Ok MdxResponse.{ cols = { tuples = tuples1 }, { tuples = tuples2 }; data; info }
-        | data ->
-          Log.yojson data;
-          Error (`WrondData data)
+          Ok
+            MdxResponse.
+              { cols =
+                  { tuples = tuples1 }, Option.map tuples2 ~f:(fun tuples -> { tuples })
+              ; data
+              ; info
+              }
+        | data -> Error (`WrondData (data, [%here]))
       in
       Lwt.return m
     | `Unauthorized -> Lwt.return (Error `Unauthorized)
